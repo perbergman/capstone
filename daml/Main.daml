@@ -1,0 +1,46 @@
+module Main where
+
+template CoinMaster
+  with
+    issuer: Party
+  where
+    signatory issuer
+
+    nonconsuming choice Invite : ContractId CoinIssueProposal
+      with owner: Party
+      controller issuer
+      do create CoinIssueProposal
+            with coinAgreement = CoinIssueAgreement with issuer; owner
+
+template CoinIssueProposal
+  with
+    coinAgreement: CoinIssueAgreement
+  where
+    signatory coinAgreement.issuer
+    observer coinAgreement.owner
+
+    choice AcceptCoinProposal
+      : ContractId CoinIssueAgreement
+      controller coinAgreement.owner
+      do create coinAgreement
+
+template CoinIssueAgreement
+  with
+    issuer: Party
+    owner: Party
+  where
+    signatory issuer, owner
+
+    nonconsuming choice Issue : ContractId Coin
+      with amount: Decimal
+      controller issuer
+      do create Coin with issuer; owner; amount
+
+template Coin
+  with
+    issuer: Party
+    owner: Party
+    amount: Decimal
+  where
+    signatory issuer, owner
+
