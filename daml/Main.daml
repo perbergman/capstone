@@ -1,46 +1,87 @@
 module Main where
 
-template CoinMaster
+type AssetId = ContractId AssetT
+data Values = Values with
+   totalGas : Decimal
+   totalWater : Decimal
+ deriving (Eq, Show)
+
+template AssetT
   with
-    issuer: Party
+    issuer : Party
+    owner : Party
+    id : Text
+    values : Values
+    price : Decimal
+    description : Optional Text
+    observers : [Party]
+
   where
-    signatory issuer
-
-    nonconsuming choice Invite : ContractId CoinIssueProposal
-      with owner: Party
-      controller issuer
-      do create CoinIssueProposal
-            with coinAgreement = CoinIssueAgreement with issuer; owner
-
-template CoinIssueProposal
-  with
-    coinAgreement: CoinIssueAgreement
-  where
-    signatory coinAgreement.issuer
-    observer coinAgreement.owner
-
-    choice AcceptCoinProposal
-      : ContractId CoinIssueAgreement
-      controller coinAgreement.owner
-      do create coinAgreement
-
-template CoinIssueAgreement
-  with
-    issuer: Party
-    owner: Party
-  where
+    ensure values.totalGas > 0.0 && values.totalWater > 0.0
     signatory issuer, owner
+    observer observers
+    key (issuer, id) : (Party, Text)
+    maintainer key._1    
 
-    nonconsuming choice Issue : ContractId Coin
-      with amount: Decimal
-      controller issuer
-      do create Coin with issuer; owner; amount
+    -- Transfer Asset with a price
+    choice Asset_Transfer : ContractId AssetTransfer
+         with
+          price: Decimal
+          newOwner : Party
+         controller owner 
+         do
+          assertMsg "Price must be positive" (price > 0.0)
+          create AssetTransfer with df = this; newOwner; price
 
-template Coin
+    -- Split this Asset into two new Assets by factor (0..1)
+    choice Asset_Split : (AssetId, AssetId)
+        with
+          splitAt: Decimal
+        controller owner 
+        do
+          let splitWater1 = values.totalWater * splitAt
+          let splitGas1 = values.totalGas * splitAt
+          let splitWater2 = values.totalWater - splitWater1
+          let splitGas2 = values.totalGas - splitGas1 
+
+          df1 <- create this with values.totalGas = splitGas1; values.totalWater = splitWater1
+          df2 <- create this with values.totalGas = splitGas2; values.totalWater = splitWater2
+          return (df1, df2)
+
+      -- Retire this Asset
+    choice Archives: ()
+        controller owner
+        do
+          assertMsg "issuer must be owner" (issuer == owner)  
+
+      -- Merge this Asset with another Asset. Create a new Asset
+    choice Asset_Merge : AssetId
+        with
+          otherCid: AssetId
+        controller owner
+        do
+          other <- fetch otherCid
+          let water = values.totalWater + other.values.totalWater 
+          let gas = values.totalGas + other.values.totalGas
+          newAsset <- create this with values.totalGas = gas; values.totalWater = water
+          archive otherCid
+          return newAsset
+
+template AssetTransfer
   with
-    issuer: Party
-    owner: Party
-    amount: Decimal
+    df : AssetT
+    newOwner : Party
+    price : Decimal
   where
-    signatory issuer, owner
+    signatory df.issuer, df.owner
 
+    choice  AssetTransfer_Accept : AssetId
+      with 
+        newOwner : Party
+      controller newOwner    
+      do
+        if newOwner `elem` df.observers then 
+          abort "New owner must not be an observer"
+        else create df with
+          owner = newOwner
+          observers = df.observers 
