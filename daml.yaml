@@ -1,11 +1,14 @@
 sdk-version: 2.6.4
 name: capstone
 source: daml
+init-script: Main:tests
 version: 0.0.1
 dependencies:
   - daml-prim
   - daml-stdlib
   - daml-script
+parties:
+  - Alice
+  - Bob
 exposed-modules:
   - Main
-

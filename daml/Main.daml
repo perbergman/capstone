@@ -1,5 +1,7 @@
 module Main where
 
+import Daml.Script
+
 type AssetId = ContractId AssetT
 data Values = Values with
    totalGas : Decimal
@@ -10,7 +12,7 @@ template AssetT
   with
     issuer : Party
     owner : Party
-    id : Text
+    id : Int
     values : Values
     price : Decimal
     description : Optional Text
@@ -20,18 +22,18 @@ template AssetT
     ensure values.totalGas > 0.0 && values.totalWater > 0.0
     signatory issuer, owner
     observer observers
-    key (issuer, id) : (Party, Text)
+    key (issuer, id) : (Party, Int)
     maintainer key._1    
 
     -- Transfer Asset with a price
     choice Asset_Transfer : ContractId AssetTransfer
          with
           price: Decimal
-          newOwner : Party
+          nextOwner: Party
          controller owner 
          do
           assertMsg "Price must be positive" (price > 0.0)
-          create AssetTransfer with df = this; newOwner; price
+          create AssetTransfer with df = this; price, newOwner = nextOwner
 
     -- Split this Asset into two new Assets by factor (0..1)
     choice Asset_Split : (AssetId, AssetId)
@@ -44,8 +46,8 @@ template AssetT
           let splitWater2 = values.totalWater - splitWater1
           let splitGas2 = values.totalGas - splitGas1 
 
-          df1 <- create this with values.totalGas = splitGas1; values.totalWater = splitWater1
-          df2 <- create this with values.totalGas = splitGas2; values.totalWater = splitWater2
+          df1 <- create this with values.totalGas = splitGas1; values.totalWater = splitWater1; id = id + 1
+          df2 <- create this with values.totalGas = splitGas2; values.totalWater = splitWater2; id  = id + 2
           return (df1, df2)
 
       -- Retire this Asset
@@ -54,34 +56,80 @@ template AssetT
         do
           assertMsg "issuer must be owner" (issuer == owner)  
 
-      -- Merge this Asset with another Asset. Create a new Asset
-    choice Asset_Merge : AssetId
-        with
-          otherCid: AssetId
-        controller owner
-        do
-          other <- fetch otherCid
-          let water = values.totalWater + other.values.totalWater 
-          let gas = values.totalGas + other.values.totalGas
-          newAsset <- create this with values.totalGas = gas; values.totalWater = water
-          archive otherCid
-          return newAsset
-
 template AssetTransfer
   with
     df : AssetT
-    newOwner : Party
     price : Decimal
+    newOwner : Party
   where
-    signatory df.issuer, df.owner
+    signatory df.owner
 
     choice  AssetTransfer_Accept : AssetId
-      with 
-        newOwner : Party
-      controller newOwner    
+      controller newOwner
       do
-        if newOwner `elem` df.observers then 
-          abort "New owner must not be an observer"
+        if newOwner `notElem` df.observers then 
+          abort "New owner must be an observer"
         else create df with
           owner = newOwner
-          observers = df.observers 
+          issuer = df.issuer
+          observers = df.issuer :: df.observers
+
+tests : Script ()
+tests = script do
+  alice <- allocateParty "Alice"
+  bob <- allocateParty "Bob"
+
+  asset1 <- submit alice do
+    createCmd AssetT with
+      issuer = alice
+      owner = alice
+      id = 1
+      values = Values with totalGas = 100.0; totalWater = 100.0
+      price = 100.0
+      description = None
+      observers = [bob]
+
+  transfer1 <- submit alice do
+    exerciseCmd asset1 (Asset_Transfer with price = 100.0, nextOwner = bob)
+
+  accept1 <- submit bob do
+    exerciseCmd transfer1 AssetTransfer_Accept
+
+  submit bob do
+    exerciseCmd accept1 (Asset_Split with splitAt = 0.6)
+
+  asset2 <- submitMustFail alice do
+    createCmd AssetT with
+      issuer = alice
+      owner = alice
+      id = 1
+      values = Values with totalGas = 1.0; totalWater = 0.0
+      price = 100.0
+      description = None
+      observers = [bob]
+
+  asset2 <- submitMustFail alice do
+    createCmd AssetT with
+      issuer = alice
+      owner = alice
+      id = 1
+      values = Values with totalGas = 0.0; totalWater = 1.0
+      price = 100.0
+      description = None
+      observers = [bob]
+
+  asset3 <- submit alice do
+    createCmd AssetT with
+      issuer = alice
+      owner = alice
+      id = 4
+      values = Values with totalGas = 100.0; totalWater = 100.0
+      price = 100.0
+      description = None
+      observers = [bob]
+
+  arch1 <- submitMustFail bob do
+    exerciseCmd asset3 (Archives)
+
+
+  return ()
