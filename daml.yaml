@@ -1,7 +1,7 @@
 sdk-version: 2.6.4
 name: capstone
 source: daml
-init-script: Main:tests
+init-script: Test:setupParties
 version: 0.0.1
 dependencies:
   - daml-prim
@@ -12,3 +12,4 @@ parties:
   - Bob
 exposed-modules:
   - Main
+  - Test
