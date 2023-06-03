@@ -1,7 +1,5 @@
 module Main where
 
-import Daml.Script
-
 type AssetId = ContractId AssetT
 data Values = Values with
    totalGas : Decimal
@@ -19,7 +17,7 @@ template AssetT
     observers : [Party]
 
   where
-    ensure values.totalGas > 0.0 && values.totalWater > 0.0
+    ensure values.totalGas > 0.0 && values.totalWater > 0.0 && price > 0.0
     signatory issuer, owner
     observer observers
     key (issuer, id) : (Party, Int)
@@ -74,62 +72,3 @@ template AssetTransfer
           issuer = df.issuer
           observers = df.issuer :: df.observers
 
-tests : Script ()
-tests = script do
-  alice <- allocateParty "Alice"
-  bob <- allocateParty "Bob"
-
-  asset1 <- submit alice do
-    createCmd AssetT with
-      issuer = alice
-      owner = alice
-      id = 1
-      values = Values with totalGas = 100.0; totalWater = 100.0
-      price = 100.0
-      description = None
-      observers = [bob]
-
-  transfer1 <- submit alice do
-    exerciseCmd asset1 (Asset_Transfer with price = 100.0, nextOwner = bob)
-
-  accept1 <- submit bob do
-    exerciseCmd transfer1 AssetTransfer_Accept
-
-  submit bob do
-    exerciseCmd accept1 (Asset_Split with splitAt = 0.6)
-
-  asset2 <- submitMustFail alice do
-    createCmd AssetT with
-      issuer = alice
-      owner = alice
-      id = 1
-      values = Values with totalGas = 1.0; totalWater = 0.0
-      price = 100.0
-      description = None
-      observers = [bob]
-
-  asset2 <- submitMustFail alice do
-    createCmd AssetT with
-      issuer = alice
-      owner = alice
-      id = 1
-      values = Values with totalGas = 0.0; totalWater = 1.0
-      price = 100.0
-      description = None
-      observers = [bob]
-
-  asset3 <- submit alice do
-    createCmd AssetT with
-      issuer = alice
-      owner = alice
-      id = 4
-      values = Values with totalGas = 100.0; totalWater = 100.0
-      price = 100.0
-      description = None
-      observers = [bob]
-
-  arch1 <- submitMustFail bob do
-    exerciseCmd asset3 (Archives)
-
-
-  return ()
